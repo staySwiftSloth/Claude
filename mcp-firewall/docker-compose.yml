@@ -1,0 +1,65 @@
+# Edge MCP stack:
+#
+#   Claude ──► firewall :8080 ──► edge-mcp :8931 ──► egress :3128 ──► internet
+#             (auth map:          (Playwright MCP    (squid domain
+#              tokens, tools,      + headless Edge,   allowlist, no
+#              URLs, sessions)     no ports, no       private IPs)
+#                                  direct internet)
+#
+# Only the firewall publishes a port. Edge lives on the internal "backend"
+# network, which has no route out except the egress proxy.
+
+services:
+  firewall:
+    build: ./firewall
+    image: mcp-firewall:latest
+    container_name: mcp-firewall
+    init: true
+    environment:
+      UPSTREAM_URL: http://edge-mcp:8931/mcp
+      AUTH_MAP_PATH: /config/auth-map.json
+      # Comma-separated browser origins allowed to call the gateway (leave empty
+      # for CLI/desktop clients, which send no Origin header).
+      ALLOWED_ORIGINS: ""
+    volumes:
+      - ./config/auth-map.json:/config/auth-map.json:ro
+    ports:
+      - "127.0.0.1:8080:8080"           # put a TLS reverse proxy in front before exposing further
+    networks: [frontend, backend]
+    depends_on: [edge-mcp]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+
+  edge-mcp:
+    build: .
+    image: edge-mcp:latest
+    container_name: edge-mcp
+    platform: linux/amd64                # Edge for Linux is amd64-only
+    command: ["--browser", "msedge", "--headless", "--no-sandbox",
+              "--host", "0.0.0.0", "--port", "8931", "--allowed-hosts", "*",
+              "--isolated", "--output-dir", "/data/output",
+              "--proxy-server", "http://egress:3128"]
+    shm_size: "1gb"                      # Chromium-based browsers crash with Docker's 64MB default
+    volumes:
+      - ./output:/data/output
+    networks: [backend]                  # internal only: no published ports, no direct internet
+    depends_on: [egress]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+
+  egress:
+    image: ubuntu/squid:latest
+    container_name: mcp-egress
+    volumes:
+      - ./egress/squid.conf:/etc/squid/squid.conf:ro
+      - ./egress/allowed-domains.txt:/etc/squid/allowed-domains.txt:ro
+    networks: [backend, internet]
+    restart: unless-stopped
+
+networks:
+  frontend: {}
+  backend:
+    internal: true
+  internet: {}

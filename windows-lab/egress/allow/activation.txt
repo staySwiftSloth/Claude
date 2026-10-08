@@ -1,0 +1,9 @@
+# Windows activation and licence validation. Allowed for every app segment so a
+# Pro key can activate even when Windows Update is cut off.
+.sls.microsoft.com
+licensing.mp.microsoft.com
+purchase.mp.microsoft.com
+displaycatalog.mp.microsoft.com
+login.live.com
+go.microsoft.com
+crl.microsoft.com

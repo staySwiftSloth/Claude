@@ -108,6 +108,76 @@ foreach ($svc in ($Sel.services | Where-Object { $_.disable })) {
     }
 }
 
+# --- 4b. Registry cleanup ----------------------------------------------------
+# Deletes only the keys/values listed under "registry" in selection.json.
+# Every deletion is exported to C:\OEM\registry-backup\NNN-<id>.reg first; if the
+# export fails, nothing is deleted. Undo all of it with registry-backup\restore.ps1.
+#
+# "Users" entries apply to the Default profile (so new accounts never get them)
+# and to every profile already loaded (WIN_USER, if setup has created it).
+
+$BackupDir   = Join-Path $PSScriptRoot 'registry-backup'
+$DefaultHive = 'HKU\LabDefaultUser'
+$UserRoots   = New-Object System.Collections.Generic.List[string]
+
+& reg.exe load $DefaultHive "$env:SystemDrive\Users\Default\NTUSER.DAT" 2>&1 | Out-Null
+$defaultLoaded = ($LASTEXITCODE -eq 0)
+if ($defaultLoaded) { $UserRoots.Add('Registry::HKEY_USERS\LabDefaultUser') }
+else { Add-Result 'registry' 'Default user hive' 'failed' 'could not load C:\Users\Default\NTUSER.DAT; new profiles will not get user-level changes' }
+Get-ChildItem 'Registry::HKEY_USERS' | Where-Object { $_.PSChildName -match '^S-1-5-21-[\d-]+$' } |
+    ForEach-Object { $UserRoots.Add("Registry::HKEY_USERS\$($_.PSChildName)") }
+
+function Get-RegRoots([string]$Hive) {
+    switch ($Hive) {
+        'HKLM'  { @('Registry::HKEY_LOCAL_MACHINE') }
+        'Users' { $UserRoots }
+        default { throw "unknown hive '$Hive' (use HKLM or Users)" }
+    }
+}
+function ConvertTo-RegExePath([string]$PsPath) {
+    $PsPath -replace '^Registry::HKEY_LOCAL_MACHINE', 'HKLM' -replace '^Registry::HKEY_USERS', 'HKU'
+}
+
+if (-not $DryRun) {
+    New-Item -ItemType Directory -Force -Path $BackupDir | Out-Null
+    # restore.ps1: re-imports every backup (run as admin; load the Default hive the same way)
+    @'
+& reg.exe load HKU\LabDefaultUser "$env:SystemDrive\Users\Default\NTUSER.DAT" 2>&1 | Out-Null
+Get-ChildItem -Path $PSScriptRoot -Filter *.reg | Sort-Object Name | ForEach-Object {
+    & reg.exe import $_.FullName
+    Write-Output "restored $($_.Name)"
+}
+[gc]::Collect(); [gc]::WaitForPendingFinalizers()
+& reg.exe unload HKU\LabDefaultUser 2>&1 | Out-Null
+'@ | Set-Content -Path (Join-Path $BackupDir 'restore.ps1') -Encoding UTF8
+}
+
+$n = (Get-ChildItem -Path $BackupDir -Filter *.reg -ErrorAction SilentlyContinue | Measure-Object).Count
+foreach ($r in ($Sel.registry | Where-Object { $_.remove })) {
+    foreach ($root in (Get-RegRoots $r.hive)) {
+        $keyPath = "$root\$($r.key)"
+        $where   = if ($root -like '*LOCAL_MACHINE') { 'HKLM' } elseif ($root -like '*LabDefaultUser') { 'Default profile' } else { Split-Path $root -Leaf }
+        $label   = "$($r.id) [$where]"
+        if (-not (Test-Path -LiteralPath $keyPath)) { Add-Result 'registry' $label 'absent'; continue }
+        $names = @()
+        if ($r.value) {
+            $names = @((Get-Item -LiteralPath $keyPath).Property | Where-Object { $_ -like $r.value })
+            if (-not $names) { Add-Result 'registry' $label 'absent'; continue }
+        }
+        $n++
+        $backup = Join-Path $BackupDir ('{0:D3}-{1}.reg' -f $n, $r.id)
+        Invoke-Change 'registry' $label {
+            & reg.exe export (ConvertTo-RegExePath $keyPath) $backup /y 2>&1 | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw 'backup export failed; nothing deleted' }
+            if ($r.value) {
+                foreach ($v in $names) { Remove-ItemProperty -LiteralPath $keyPath -Name $v -ErrorAction Stop }
+            } else {
+                Remove-Item -LiteralPath $keyPath -Recurse -Force -ErrorAction Stop
+            }
+        }
+    }
+}
+
 # --- 5. Registry / policy tweaks ---------------------------------------------
 
 $T = $Sel.tweaks
@@ -118,7 +188,16 @@ $tweakActions = [ordered]@{
         Set-Reg 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI' 'DisableAIDataAnalysis' 1
         Set-Reg 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI' 'AllowRecallEnablement' 0
     }
-    disableConsumerFeatures = { Set-Reg 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\CloudContent' 'DisableWindowsConsumerFeatures' 1 }
+    suppressSuggestedApps = {
+        # Per-user Content Delivery Manager switches. Unlike the CloudContent policy
+        # (Enterprise/Education only), Windows 11 Pro honours these.
+        $cdmValues = 'ContentDeliveryAllowed', 'OemPreInstalledAppsEnabled', 'PreInstalledAppsEnabled',
+                     'PreInstalledAppsEverEnabled', 'SilentInstalledAppsEnabled', 'SubscribedContentEnabled',
+                     'SystemPaneSuggestionsEnabled', 'SoftLandingEnabled', 'RotatingLockScreenOverlayEnabled'
+        foreach ($root in $UserRoots) {
+            foreach ($v in $cdmValues) { Set-Reg "$root\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager" $v 0 }
+        }
+    }
     disableAdvertisingId    = { Set-Reg 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\AdvertisingInfo' 'DisabledByGroupPolicy' 1 }
     disableLLMNR            = { Set-Reg 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient' 'EnableMulticast' 0 }
     disableNetbiosOverTcp   = {
@@ -151,6 +230,13 @@ foreach ($key in $tweakActions.Keys) {
     if ($null -eq $entry)  { Add-Result 'tweak' $key 'unset'; continue }
     if (-not $entry.enabled) { Add-Result 'tweak' $key 'kept'; continue }
     Invoke-Change 'tweak' $key $tweakActions[$key]
+}
+
+# Done with user-level changes: release the Default profile hive.
+if ($defaultLoaded) {
+    [gc]::Collect(); [gc]::WaitForPendingFinalizers(); Start-Sleep -Seconds 1
+    & reg.exe unload $DefaultHive 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { Add-Result 'registry' 'Default user hive' 'warning' 'still loaded; Windows releases it at the next restart' }
 }
 
 # --- 5b. Remote Desktop (always on: Guacamole connects over RDP 3389) ----------

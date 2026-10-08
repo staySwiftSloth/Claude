@@ -45,6 +45,7 @@ Removed for all existing users and de-provisioned so new profiles don't get them
 | `MicrosoftTeams` | **remove** | Teams (older package name) |
 | `Microsoft.Windows.DevHome` | **remove** | Dev Home |
 | `Microsoft.StorePurchaseApp` | **remove** | Store purchase flow |
+| `MicrosoftWindows.Client.WebExperience` | **remove** | Widgets board and its news feed |
 | `Microsoft.Windows.Photos` | keep | Default image viewer; remove if apps never open images |
 | `Microsoft.Paint` | keep | Paint |
 | `Microsoft.ScreenSketch` | keep | Snipping Tool; handy for screenshots during support |
@@ -136,13 +137,27 @@ These are never touched, whatever the file says: `TermService`, `UmRdpService`, 
 | `Spooler` | leave | Print spooler (PrintNightmare). Set true if nothing prints, Print to PDF included |
 | `WSearch` | leave | Search indexer; set true to save CPU/disk if Start search isn't used |
 
+## Registry keys and values to delete
+
+Each is exported to `C:\OEM\registry-backup\NNN-<id>.reg` before deletion (no backup, no delete); `registry-backup\restore.ps1` puts everything back. **Users** means the Default profile, so new accounts never get it, plus every profile already on the VM.
+
+| Id | Where | Key (value) | Default | Why |
+|---|---|---|---|---|
+| `oneDriveSetupAutorun` | Users | `Software\Microsoft\Windows\CurrentVersion\Run` (`OneDriveSetup`) | **remove** | Run entry that installs OneDrive into every new profile at first logon |
+| `edgeAutoLaunch` | Users | `Software\Microsoft\Windows\CurrentVersion\Run` (`MicrosoftEdgeAutoLaunch_*`) | **remove** | Starts Edge in the background at every logon; Edge still works when opened |
+| `teamsAutorun` | Users | `Software\Microsoft\Windows\CurrentVersion\Run` (`com.squirrel.Teams.Teams`) | **remove** | Leftover Teams autostart after the Teams app is removed |
+| `cdmSubscriptions` | Users | `Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager\Subscriptions` | **remove** | Cached promo subscriptions for Start and the lock screen |
+| `cdmSuggestedApps` | Users | `Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager\SuggestedApps` | **remove** | Queue of 'suggested' apps Windows would install on its own |
+| `explorerGallery` | HKLM | `SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Desktop\NameSpace_41040327\{e88865ea-0e1c-4e20-9aa6-edcd0212c87c}` | keep | Gallery in File Explorer's navigation pane (cosmetic) |
+| `explorerHome` | HKLM | `SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Desktop\NameSpace_36354489\{f874310e-b6b7-47dc-bc84-b9e6b38f5903}` | keep | Home in File Explorer's navigation pane (cosmetic; Explorer then opens to This PC) |
+
 ## Policy and registry tweaks
 
 | Tweak | Default | What it does |
 |---|---|---|
 | `telemetryMinimum` | **on** | AllowTelemetry policy at the lowest level the edition accepts (0 = Enterprise/Education only; Pro floors at 1) |
 | `disableCopilotAndRecall` | **on** | Policies that switch off Windows Copilot and Recall snapshots |
-| `disableConsumerFeatures` | **on** | Stops auto-installed suggested apps (honoured fully on Enterprise/Education) |
+| `suppressSuggestedApps` | **on** | Turns off suggested/auto-installed apps and lock-screen promos for the Default profile and existing users (works on Pro, unlike the CloudContent policy) |
 | `disableAdvertisingId` | **on** | Per-user ad tracking ID |
 | `disableLLMNR` | **on** | Multicast name resolution; poisoning target (Responder) |
 | `disableNetbiosOverTcp` | **on** | NetBIOS name service on every adapter |

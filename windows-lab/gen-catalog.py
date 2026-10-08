@@ -25,6 +25,14 @@ table("Services", "services", "disable", "**disable**", "leave",
                              "SecurityHealthService","EventLog","Dnscache","Dhcp","NlaSvc","netprofm",
                              "CryptSvc","RpcSs","LSM","wuauserv"]) +
       ". RDP has to stay up because Guacamole connects over it. Windows Update has its own switch under tweaks.")
+out.extend(["## Registry keys and values to delete", "",
+            "Each is exported to `C:\\OEM\\registry-backup\\NNN-<id>.reg` before deletion (no backup, no delete); `registry-backup\\restore.ps1` puts everything back. "
+            "**Users** means the Default profile, so new accounts never get it, plus every profile already on the VM.", "",
+            "| Id | Where | Key (value) | Default | Why |", "|---|---|---|---|---|"])
+for r in d["registry"]:
+    target = f"`{r['key']}`" + (f" (`{r['value']}`)" if r.get("value") else "")
+    out.append(f"| `{r['id']}` | {r['hive']} | {target} | {'**remove**' if r['remove'] else 'keep'} | {r['why']} |")
+out.append("")
 out.extend(["## Policy and registry tweaks", "", "| Tweak | Default | What it does |", "|---|---|---|"])
 for k, v in d["tweaks"].items():
     out.append(f"| `{k}` | {'**on**' if v['enabled'] else 'off'} | {v['why']} |")

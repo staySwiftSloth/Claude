@@ -38,6 +38,7 @@
     { "name": "MicrosoftTeams",                           "remove": true,  "why": "Teams (older package name)" },
     { "name": "Microsoft.Windows.DevHome",                "remove": true,  "why": "Dev Home" },
     { "name": "Microsoft.StorePurchaseApp",               "remove": true,  "why": "Store purchase flow" },
+    { "name": "MicrosoftWindows.Client.WebExperience",    "remove": true,  "why": "Widgets board and its news feed" },
     { "name": "Microsoft.Windows.Photos",                 "remove": false, "why": "Default image viewer; remove if apps never open images" },
     { "name": "Microsoft.Paint",                          "remove": false, "why": "Paint" },
     { "name": "Microsoft.ScreenSketch",                   "remove": false, "why": "Snipping Tool; handy for screenshots during support" },
@@ -118,10 +119,27 @@
     { "name": "WSearch",                "disable": false, "why": "Search indexer; set true to save CPU/disk if Start search isn't used" }
   ],
 
+  "registry": [
+    { "id": "oneDriveSetupAutorun", "hive": "Users", "key": "Software\\Microsoft\\Windows\\CurrentVersion\\Run", "value": "OneDriveSetup",
+      "remove": true,  "why": "Run entry that installs OneDrive into every new profile at first logon" },
+    { "id": "edgeAutoLaunch",       "hive": "Users", "key": "Software\\Microsoft\\Windows\\CurrentVersion\\Run", "value": "MicrosoftEdgeAutoLaunch_*",
+      "remove": true,  "why": "Starts Edge in the background at every logon; Edge still works when opened" },
+    { "id": "teamsAutorun",         "hive": "Users", "key": "Software\\Microsoft\\Windows\\CurrentVersion\\Run", "value": "com.squirrel.Teams.Teams",
+      "remove": true,  "why": "Leftover Teams autostart after the Teams app is removed" },
+    { "id": "cdmSubscriptions",     "hive": "Users", "key": "Software\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager\\Subscriptions",
+      "remove": true,  "why": "Cached promo subscriptions for Start and the lock screen" },
+    { "id": "cdmSuggestedApps",     "hive": "Users", "key": "Software\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager\\SuggestedApps",
+      "remove": true,  "why": "Queue of 'suggested' apps Windows would install on its own" },
+    { "id": "explorerGallery",      "hive": "HKLM",  "key": "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Desktop\\NameSpace_41040327\\{e88865ea-0e1c-4e20-9aa6-edcd0212c87c}",
+      "remove": false, "why": "Gallery in File Explorer's navigation pane (cosmetic)" },
+    { "id": "explorerHome",         "hive": "HKLM",  "key": "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Desktop\\NameSpace_36354489\\{f874310e-b6b7-47dc-bc84-b9e6b38f5903}",
+      "remove": false, "why": "Home in File Explorer's navigation pane (cosmetic; Explorer then opens to This PC)" }
+  ],
+
   "tweaks": {
     "telemetryMinimum":        { "enabled": true,  "why": "AllowTelemetry policy at the lowest level the edition accepts (0 = Enterprise/Education only; Pro floors at 1)" },
     "disableCopilotAndRecall": { "enabled": true,  "why": "Policies that switch off Windows Copilot and Recall snapshots" },
-    "disableConsumerFeatures": { "enabled": true,  "why": "Stops auto-installed suggested apps (honoured fully on Enterprise/Education)" },
+    "suppressSuggestedApps":   { "enabled": true,  "why": "Turns off suggested/auto-installed apps and lock-screen promos for the Default profile and existing users (works on Pro, unlike the CloudContent policy)" },
     "disableAdvertisingId":    { "enabled": true,  "why": "Per-user ad tracking ID" },
     "disableLLMNR":            { "enabled": true,  "why": "Multicast name resolution; poisoning target (Responder)" },
     "disableNetbiosOverTcp":   { "enabled": true,  "why": "NetBIOS name service on every adapter" },

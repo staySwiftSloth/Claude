@@ -24,11 +24,25 @@ The MCP firewall is an MCP (HTTP/JSON-RPC) gateway. It decides what Claude's bro
 
 ## Choosing what gets removed
 
-`selections/default.json` is the selectable list, and **[CATALOG.md](CATALOG.md)** shows it as tables: 45 Store apps, 19 capabilities, 16 optional features, 25 services, 15 policy tweaks and 5 offline installers. Each entry has a default and a reason.
+`selections/default.json` is the selectable list, and **[CATALOG.md](CATALOG.md)** shows it as tables: 46 Store apps, 19 capabilities, 16 optional features, 25 services, 7 registry deletions, 15 policy tweaks and 5 offline installers. Each entry has a default and a reason.
 
 - Flip `remove`, `disable`, `enabled` or `install` to change an entry.
 - For a per-VM profile, copy the file to `selections/app-a.json`. `make-oem.sh` uses it automatically.
 - After editing, run `python3 gen-catalog.py` to refresh CATALOG.md.
+
+### Registry cleanup
+
+`registry` in the selection file lists specific keys and values to delete. By default that's the OneDrive, Edge and Teams autostarts, plus Windows' cached promo and "suggested apps" entries. They're removed from the Default profile, so new accounts never get them, and from any profile already on the VM. Explorer's Gallery and Home entries are listed too, but kept unless you turn them on.
+
+Every deletion is exported to `C:\OEM\registry-backup\NNN-<id>.reg` first. If the export fails, nothing is deleted. `C:\OEM\registry-backup\restore.ps1` (run as admin) puts it all back.
+
+Some things are deliberately left alone, because deleting them causes harm and frees nothing useful:
+
+- `Appx\AppxAllUserStore\Deprovisioned`: these entries stop removed apps coming back after a feature update.
+- Uninstall entries, `HKCR`/CLSID registrations and service keys: services are disabled with `Set-Service`, not deleted.
+- So-called orphaned keys that registry cleaners report: they take bytes, don't slow Windows down, and deleting them is a common cause of broken updates.
+
+To add your own entry, use `{ "id", "hive": "HKLM" | "Users", "key", "value" (optional, `*` wildcards allowed), "remove", "why" }`. Leave out `value` to delete the whole key.
 
 RDP, Defender, the firewall and core networking services are on a protected list in `harden.ps1` and can't be disabled through the JSON. That protection exists because disabling RDP would lock Guacamole out.
 

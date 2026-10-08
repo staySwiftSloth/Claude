@@ -1,0 +1,4 @@
+output/
+.DS_Store
+config/auth-map.json
+node_modules/

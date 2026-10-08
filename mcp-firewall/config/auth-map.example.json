@@ -1,0 +1,43 @@
+{
+  "clients": {
+    "claude-code": {
+      "tokenSha256": "REPLACE_WITH_64_HEX_CHARS_FROM_gen-token.js_000000000000000000000",
+      "tools": {
+        "allow": ["browser_*"],
+        "deny": [
+          "browser_run_code_unsafe",
+          "browser_evaluate",
+          "browser_file_upload",
+          "browser_drop",
+          "browser_install"
+        ]
+      },
+      "urls": {
+        "allow": ["https://example.com", "https://*.wikipedia.org", "https://github.com"],
+        "deny": []
+      },
+      "rateLimitPerMinute": 120
+    },
+    "read-only-agent": {
+      "tokenSha256": "REPLACE_WITH_A_SECOND_HASH_000000000000000000000000000000000000000",
+      "tools": {
+        "allow": [
+          "browser_navigate",
+          "browser_navigate_back",
+          "browser_snapshot",
+          "browser_find",
+          "browser_take_screenshot",
+          "browser_wait_for",
+          "browser_tabs",
+          "browser_close"
+        ],
+        "deny": []
+      },
+      "urls": {
+        "allow": ["https://*.wikipedia.org"],
+        "deny": []
+      },
+      "rateLimitPerMinute": 60
+    }
+  }
+}

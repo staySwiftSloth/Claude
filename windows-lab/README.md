@@ -36,7 +36,41 @@ RDP, Defender, the firewall and core networking services are on a protected list
 
 dockur copies the VM's OEM folder to `C:\OEM` and runs `install.bat` in the last step of unattended setup. So the removals happen before anyone logs in. Store apps are also de-provisioned, so new user profiles don't get them back.
 
-For an even smaller starting point, set `VERSION: "11l"` (Windows 11 LTSC, which ships with almost no Store apps). The selection file still applies on top.
+## Windows 11 Pro and product keys
+
+Every VM installs **Windows 11 Pro** (`VERSION: "11"` in `docker-compose.yml`, which is dockur's Pro edition). Don't switch to `11l` or `11e`: those are LTSC and Enterprise editions, and a Pro key won't activate them. Your ISO must be a standard Windows 11 multi-edition ISO, which includes Pro.
+
+To add keys:
+
+```bash
+cp keys/product-keys.env.example keys/product-keys.env
+nano keys/product-keys.env
+```
+
+```
+DEFAULT=
+app-a=XXXXX-XXXXX-XXXXX-XXXXX-XXXXX
+app-b=XXXXX-XXXXX-XXXXX-XXXXX-XXXXX
+```
+
+- **Lookup order:** a VM uses its own line, then `DEFAULT`, and runs unactivated if neither is set. Running unactivated is fine for testing.
+- **One key per VM:** a retail key activates one machine.
+- **Getting it in:** `make-oem.sh` checks the format and writes the key into that VM's OEM folder only (`build/oem-<vm>/product-key.txt`, mode 600). Both `keys/product-keys.env` and `build/` are git-ignored.
+- **On first boot:** `harden.ps1` installs the key, then activates once the egress proxy is set. The proxy allows Microsoft's licensing hosts for every VM (`egress/allow/activation.txt`). It then deletes the key from `C:\OEM`.
+- **Changing a key later:** run `slmgr /ipk <key>` then `slmgr /ato` inside the VM. Use `slmgr /xpr` to check status. Activation results are in `harden-report.json`, with the key masked to its last 5 characters.
+- **Clean up after first boot:** delete `build/` once every VM has finished installing. dockur has copied what it needs by then, and this removes the last copy of each key outside Windows.
+
+## Remote Desktop
+
+Guacamole connects to each VM over **RDP on TCP/UDP 3389**, using NLA. Port 3389 isn't published on the host, so the only way in is through Guacamole. `harden.ps1` always sets RDP up, whatever the selection file says:
+
+- allows connections (`fDenyTSConnections=0`) and confirms the listener is on port 3389
+- sets `TermService`, `UmRdpService` and `SessionEnv` to Automatic and starts the RDP service
+- adds `WIN_USER` (from `.env`) to Remote Desktop Users. You can add other accounts in `remoteDesktop.users` in the selection file
+- opens 3389 in the Windows firewall (`Lab RDP TCP/UDP` rules) while everything else inbound stays blocked
+- requires NLA (`rdpRequireNla`) and blocks drive redirection. Clipboard is allowed by default; set `rdpDisableClipboard` to true to block it
+
+The connections are in `guacamole/02-connections.sql` (`hostname app-a`, `port 3389`, `security nla`).
 
 ## Installation files
 
@@ -47,7 +81,8 @@ For an even smaller starting point, set `VERSION: "11l"` (Windows 11 LTSC, which
 | `oem/installers/` | VM | Offline installers. The VMs can't download them, since their only exit is the allowlist |
 | `oem/installers/SHA256SUMS` | VM | harden.ps1 runs only installers listed here with a matching hash |
 | `fetch-installers.sh` | host | Downloads pinned installers and writes SHA256SUMS. Only VC++ is filled in; add pinned URLs for the rest |
-| `make-oem.sh <vm> <egress-ip>` | host | Builds `build/oem-<vm>/`: scripts, that VM's selection with its proxy IP, and only the installers it asks for |
+| `make-oem.sh <vm> <egress-ip>` | host | Builds `build/oem-<vm>/`: scripts, that VM's selection with its proxy IP and RDP user, its Pro key, and only the installers it asks for |
+| `keys/product-keys.env` | host | Your Windows 11 Pro keys, one per VM (copy from `.example`; git-ignored) |
 | `setup.sh` | host | Checks KVM, `.env`, ISO and auth map; generates the Guacamole schema; builds every OEM folder |
 
 Results inside each VM: `C:\OEM\harden.log` (full transcript) and `C:\OEM\harden-report.json` (one line per item: `done`, `absent`, `already`, `kept`, `protected`, `failed`, `refused`, `missing`).
@@ -56,6 +91,7 @@ Results inside each VM: `C:\OEM\harden.log` (full transcript) and `C:\OEM\harden
 
 ```bash
 cp .env.example .env               # set WIN_USER, WIN_PASSWORD, DB passwords
+cp keys/product-keys.env.example keys/product-keys.env   # optional: Windows 11 Pro keys
 mkdir -p isos                       # save the Windows 11 ISO from Microsoft as isos/windows.iso
 ./fetch-installers.sh               # optional: offline installers + hashes
 ./setup.sh                          # checks, Guacamole schema, OEM folders
@@ -96,7 +132,7 @@ Test isolation from inside app-a:
 ## Known limits
 
 - **Edge for Linux and dockur are amd64-only**, and dockur needs `/dev/kvm`. A cloud VM needs nested virtualisation enabled.
-- **Telemetry floor:** `AllowTelemetry=0` and `DisableWindowsConsumerFeatures` are fully honoured only on Enterprise and Education. Pro floors at "required" diagnostic data. LTSC (`11l`) is Enterprise.
+- **Telemetry floor:** `AllowTelemetry=0` and `DisableWindowsConsumerFeatures` are fully honoured only on Enterprise and Education. On Windows 11 Pro the lowest level is "required" diagnostic data, and some suggested-app suppression is ignored.
 - **`rdpAllowFrom`:** dockur NATs port 3389 into the VM, so Windows may see the container's gateway as the source rather than guacd. Leave it `Any` (the network itself limits who can connect) unless you've confirmed which address shows up.
 - **Firewall group names** (`Remote Desktop`, `File and Printer Sharing`) are matched in English. On another display language those steps quietly do nothing, so check the report.
 - **Not run on Windows here.** The JSON, compose file and OEM build were checked on Linux. `harden.ps1` was reviewed but not executed. Run it with `-DryRun` on your first VM and read the report before relying on it.

@@ -136,6 +136,11 @@
     "disableWindowsUpdate":    { "enabled": false, "why": "Leave false and allowlist the update domains in egress unless you rebuild VMs often from fresh images" }
   },
 
+  "remoteDesktop": {
+    "users": [],
+    "why": "RDP is always enabled on TCP/UDP 3389 because Guacamole connects that way. These accounts are added to Remote Desktop Users. make-oem.sh fills in WIN_USER from .env; add more names if you create other users"
+  },
+
   "proxy": {
     "enabled": true,
     "server": "172.31.0.2:3128",

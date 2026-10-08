@@ -8,6 +8,8 @@
 #   Claude ─► mcp-firewall :8081 ─► edge-mcp (mcp-net, internal) ─► egress ─► internet
 #
 # Requirements: Linux host with KVM (/dev/kvm), amd64.
+# Edition: Windows 11 Pro on every VM. Keys go in keys/product-keys.env (see README).
+# Guacamole reaches each VM over RDP, TCP/UDP 3389, on that VM's internal network.
 # Before first start: see README "First run" (OEM folders, ISO, Guacamole DB init).
 
 x-windows: &windows
@@ -68,7 +70,7 @@ services:
   app-a:
     <<: *windows
     environment:
-      VERSION: "11"                      # or 11l (LTSC: far less preinstalled), tiny11, core11
+      VERSION: "11"                      # Windows 11 Pro (dockur: "11" = Pro). Not 11l/11e: a Pro key won't activate LTSC or Enterprise
       RAM_SIZE: "8G"
       CPU_CORES: "4"
       DISK_SIZE: "64G"
@@ -85,7 +87,7 @@ services:
   app-b:
     <<: *windows
     environment:
-      VERSION: "11"
+      VERSION: "11"                      # Windows 11 Pro
       RAM_SIZE: "8G"
       CPU_CORES: "4"
       DISK_SIZE: "64G"

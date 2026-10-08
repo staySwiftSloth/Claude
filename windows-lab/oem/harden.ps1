@@ -153,8 +153,61 @@ foreach ($key in $tweakActions.Keys) {
     Invoke-Change 'tweak' $key $tweakActions[$key]
 }
 
-# Remote Desktop itself must stay on (dockur enables it; make sure nothing above undid it).
-Invoke-Change 'rdp' 'fDenyTSConnections=0' { Set-Reg 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server' 'fDenyTSConnections' 0 }
+# --- 5b. Remote Desktop (always on: Guacamole connects over RDP 3389) ----------
+
+Invoke-Change 'rdp' 'allow connections (fDenyTSConnections=0)' {
+    Set-Reg 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server' 'fDenyTSConnections' 0
+}
+Invoke-Change 'rdp' 'listen on TCP 3389' {
+    Set-Reg 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' 'PortNumber' 3389
+}
+Invoke-Change 'rdp' 'TermService automatic + running' {
+    foreach ($s in 'TermService', 'UmRdpService', 'SessionEnv') {
+        Set-Service -Name $s -StartupType Automatic -ErrorAction Stop
+    }
+    Start-Service -Name TermService -ErrorAction Stop
+}
+# Users allowed to log on over RDP. make-oem.sh fills this with WIN_USER from .env.
+# S-1-5-32-555 = Remote Desktop Users (SID works in any display language)
+$rdpGroup = Get-LocalGroup -SID 'S-1-5-32-555'
+foreach ($u in @($Sel.remoteDesktop.users)) {
+    if (-not $u) { continue }
+    if (-not (Get-LocalUser -Name $u -ErrorAction SilentlyContinue)) { Add-Result 'rdp' "user $u" 'missing' 'no such local account'; continue }
+    if (Get-LocalGroupMember -Group $rdpGroup -ErrorAction SilentlyContinue | Where-Object { $_.Name -like "*\$u" }) { Add-Result 'rdp' "user $u" 'already'; continue }
+    Invoke-Change 'rdp' "add $u to Remote Desktop Users" { Add-LocalGroupMember -Group $rdpGroup -Member $u -ErrorAction Stop }
+}
+
+# --- 5c. Edition check and product key -----------------------------------------
+
+$os = Get-CimInstance Win32_OperatingSystem
+if ($os.Caption -notmatch 'Pro') {
+    Add-Result 'edition' $os.Caption 'warning' 'expected Windows 11 Pro; a Pro key will not activate this edition'
+} else {
+    Add-Result 'edition' $os.Caption 'ok'
+}
+
+$keyFile = Join-Path $PSScriptRoot 'product-key.txt'
+if (Test-Path $keyFile) {
+    $key = (Get-Content $keyFile -Raw).Trim().ToUpper()
+    $masked = 'XXXXX-XXXXX-XXXXX-XXXXX-' + $key.Substring([Math]::Max(0, $key.Length - 5))
+    if ($key -notmatch '^([A-Z0-9]{5}-){4}[A-Z0-9]{5}$') {
+        Add-Result 'license' $masked 'refused' 'product-key.txt is not in XXXXX-XXXXX-XXXXX-XXXXX-XXXXX form'
+    } else {
+        Invoke-Change 'license' "install key $masked" {
+            $svc = Get-CimInstance SoftwareLicensingService
+            Invoke-CimMethod -InputObject $svc -MethodName InstallProductKey -Arguments @{ ProductKey = $key } -ErrorAction Stop | Out-Null
+            Invoke-CimMethod -InputObject $svc -MethodName RefreshLicenseStatus -ErrorAction Stop | Out-Null
+        }
+        if ($Report[$Report.Count - 1].status -eq 'done') {
+            $script:ActivateAfterProxy = $true  # activation needs the proxy from section 6
+            # Windows now holds the key; don't leave a copy in C:\OEM.
+            Remove-Item $keyFile -Force -ErrorAction SilentlyContinue
+        }
+        # On failure the file stays so you can see what was tried and re-run harden.ps1.
+    }
+} else {
+    Add-Result 'license' 'product-key.txt' 'absent' 'no key supplied; Windows runs unactivated (fine for testing)'
+}
 
 # --- 6. Egress proxy ---------------------------------------------------------
 
@@ -178,6 +231,18 @@ if ($Sel.proxy.enabled) {
         [Environment]::SetEnvironmentVariable('HTTPS_PROXY', "http://$px", 'Machine')
         [Environment]::SetEnvironmentVariable('NO_PROXY',    'localhost,127.0.0.1', 'Machine')
     }
+}
+
+# --- 6b. Activation (after the proxy, so Windows can reach the licensing servers) ---
+
+if ($script:ActivateAfterProxy) {
+    Invoke-Change 'license' 'activate online via egress proxy' {
+        # 55c92734-... is the Windows client licensing application ID
+        $prod = Get-CimInstance SoftwareLicensingProduct -Filter "ApplicationID='55c92734-d682-4d71-983e-d6ec3f16059f' AND PartialProductKey IS NOT NULL"
+        foreach ($p in $prod) { Invoke-CimMethod -InputObject $p -MethodName Activate -ErrorAction Stop | Out-Null }
+    }
+    # If this fails (proxy allowlist, no network yet), Windows keeps retrying on its own;
+    # force it later with:  slmgr /ato   and check with:  slmgr /xpr
 }
 
 # --- 7. Windows firewall -----------------------------------------------------

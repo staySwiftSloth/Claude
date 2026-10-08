@@ -18,6 +18,15 @@ for v in WIN_USER WIN_PASSWORD GUAC_DB_PASSWORD GUAC_DB_ROOT_PASSWORD; do
 done
 ok ".env complete"
 
+# Windows 11 Pro keys (optional: VMs without a key run unactivated)
+if [[ -f keys/product-keys.env ]]; then
+  chmod 600 keys/product-keys.env
+  ok "product keys file found (keys/product-keys.env)"
+else
+  echo "! no keys/product-keys.env: VMs will run unactivated. To add keys:"
+  echo "    cp keys/product-keys.env.example keys/product-keys.env   # then fill in one key per VM"
+fi
+
 # Windows ISO (VMs sit on internal networks and cannot download it themselves)
 [[ -f isos/windows.iso ]] || fail "isos/windows.iso missing: download the Windows 11 ISO from Microsoft and save it there"
 ok "ISO present ($(du -h isos/windows.iso | cut -f1))"

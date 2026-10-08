@@ -9,7 +9,5 @@
 .smartscreen-prod.microsoft.com
 definitionupdates.microsoft.com
 go.microsoft.com
-licensing.mp.microsoft.com
-activation-v2.sls.microsoft.com
 crl.microsoft.com
 .pki.microsoft.com

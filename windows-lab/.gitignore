@@ -7,3 +7,4 @@ mcp-output/
 guacamole/01-initdb.sql
 oem/installers/*.exe
 oem/installers/*.msi
+keys/product-keys.env

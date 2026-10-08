@@ -1,0 +1,2 @@
+# Sites app-a may reach (beyond windows-update.txt). One per line.
+example.com

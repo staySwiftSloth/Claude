@@ -1,0 +1,165 @@
+# Windows lab: dockur/windows VMs behind Guacamole, one isolated network per app,
+# internet only through a per-app egress allowlist. The MCP firewall + Edge MCP
+# from ../mcp-firewall sit on their own segment and share the egress proxy.
+#
+#   browser ─► guacamole :8080 ─► guacd ──RDP──► app-a (app-a-net, internal)
+#                                     └──RDP──► app-b (app-b-net, internal)
+#   app-a/app-b ─► egress :3128 (per-subnet allowlist) ─► internet
+#   Claude ─► mcp-firewall :8081 ─► edge-mcp (mcp-net, internal) ─► egress ─► internet
+#
+# Requirements: Linux host with KVM (/dev/kvm), amd64.
+# Before first start: see README "First run" (OEM folders, ISO, Guacamole DB init).
+
+x-windows: &windows
+  image: dockurr/windows:latest          # pin a version tag once you've tested one
+  devices: [/dev/kvm, /dev/net/tun]
+  cap_add: [NET_ADMIN]                   # dockur needs it to wire the VM's virtual NIC
+  stop_grace_period: 2m                  # let Windows shut down cleanly
+  restart: unless-stopped
+  depends_on: [egress]
+
+services:
+  # ── Remote access ───────────────────────────────────────────────────────────
+  guacamole:
+    image: guacamole/guacamole:1.5.5
+    environment:
+      GUACD_HOSTNAME: guacd
+      MYSQL_HOSTNAME: guac-db
+      MYSQL_DATABASE: guacamole_db
+      MYSQL_USER: guacamole
+      MYSQL_PASSWORD: ${GUAC_DB_PASSWORD:?set GUAC_DB_PASSWORD in .env}
+      WEBAPP_CONTEXT: ROOT               # serve at / instead of /guacamole
+    ports:
+      - "127.0.0.1:8080:8080"            # TLS reverse proxy in front before exposing beyond localhost
+    networks: [guac-web, guac-int]
+    depends_on: [guacd, guac-db]
+    restart: unless-stopped
+
+  guacd:
+    image: guacamole/guacd:1.5.5
+    # guacd is the only container on every app network. It speaks RDP out and
+    # doesn't route packets, so the app networks stay separate from each other.
+    networks:
+      guac-int: {}
+      app-a-net: { ipv4_address: 172.31.11.3 }
+      app-b-net: { ipv4_address: 172.31.12.3 }
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+
+  guac-db:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: ${GUAC_DB_ROOT_PASSWORD:?set GUAC_DB_ROOT_PASSWORD in .env}
+      MYSQL_DATABASE: guacamole_db
+      MYSQL_USER: guacamole
+      MYSQL_PASSWORD: ${GUAC_DB_PASSWORD:?set GUAC_DB_PASSWORD in .env}
+    volumes:
+      - guac-db:/var/lib/mysql
+      - ./guacamole/01-initdb.sql:/docker-entrypoint-initdb.d/01-initdb.sql:ro
+      - ./guacamole/02-connections.sql:/docker-entrypoint-initdb.d/02-connections.sql:ro
+    networks: [guac-int]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+
+  # ── Windows VMs: one network each ───────────────────────────────────────────
+  app-a:
+    <<: *windows
+    environment:
+      VERSION: "11"                      # or 11l (LTSC: far less preinstalled), tiny11, core11
+      RAM_SIZE: "8G"
+      CPU_CORES: "4"
+      DISK_SIZE: "64G"
+      USERNAME: ${WIN_USER:?set WIN_USER in .env}
+      PASSWORD: ${WIN_PASSWORD:?set WIN_PASSWORD in .env}
+    volumes:
+      - ./vms/app-a:/storage
+      - ./build/oem-app-a:/oem           # built by: ./make-oem.sh app-a 172.31.11.2
+      - ./isos/windows.iso:/custom.iso:ro   # internal network = no ISO download; supply it
+      - ./shared/app-a:/shared           # appears in Windows as Z:
+    networks:
+      app-a-net: { ipv4_address: 172.31.11.10 }
+
+  app-b:
+    <<: *windows
+    environment:
+      VERSION: "11"
+      RAM_SIZE: "8G"
+      CPU_CORES: "4"
+      DISK_SIZE: "64G"
+      USERNAME: ${WIN_USER}
+      PASSWORD: ${WIN_PASSWORD}
+    volumes:
+      - ./vms/app-b:/storage
+      - ./build/oem-app-b:/oem           # ./make-oem.sh app-b 172.31.12.2
+      - ./isos/windows.iso:/custom.iso:ro
+      - ./shared/app-b:/shared
+    networks:
+      app-b-net: { ipv4_address: 172.31.12.10 }
+
+  # ── Egress: the network firewall for every segment ──────────────────────────
+  egress:
+    image: ubuntu/squid:latest           # pin a tag once tested
+    volumes:
+      - ./egress/squid.conf:/etc/squid/squid.conf:ro
+      - ./egress/allow:/etc/squid/allow:ro
+    networks:
+      egress-out: {}
+      app-a-net: { ipv4_address: 172.31.11.2 }
+      app-b-net: { ipv4_address: 172.31.12.2 }
+      mcp-net:   { ipv4_address: 172.31.20.2 }
+    restart: unless-stopped
+
+  # ── MCP firewall + Edge (from ../mcp-firewall) ──────────────────────────────
+  mcp-firewall:
+    build: ../mcp-firewall/firewall
+    environment:
+      UPSTREAM_URL: http://edge-mcp:8931/mcp
+      AUTH_MAP_PATH: /config/auth-map.json
+    volumes:
+      - ../mcp-firewall/config/auth-map.json:/config/auth-map.json:ro
+    ports:
+      - "127.0.0.1:8081:8080"
+    networks: [mcp-front, mcp-net]
+    depends_on: [edge-mcp]
+    init: true
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+
+  edge-mcp:
+    build: ../mcp-firewall
+    platform: linux/amd64
+    command: ["--browser", "msedge", "--headless", "--no-sandbox",
+              "--host", "0.0.0.0", "--port", "8931", "--allowed-hosts", "*",
+              "--isolated", "--output-dir", "/data/output",
+              "--proxy-server", "http://172.31.20.2:3128"]
+    shm_size: "1gb"
+    volumes:
+      - ./mcp-output:/data/output
+    networks:
+      mcp-net: { ipv4_address: 172.31.20.10 }
+    depends_on: [egress]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+
+volumes:
+  guac-db: {}
+
+networks:
+  guac-web:   {}                         # Guacamole UI, published on localhost
+  guac-int:   { internal: true }         # guacamole <-> guacd <-> mysql
+  mcp-front:  {}                         # MCP firewall, published on localhost
+  egress-out: {}                         # the only segment with a route to the internet
+  app-a-net:
+    internal: true
+    ipam: { config: [{ subnet: 172.31.11.0/24 }] }
+  app-b-net:
+    internal: true
+    ipam: { config: [{ subnet: 172.31.12.0/24 }] }
+  mcp-net:
+    internal: true
+    ipam: { config: [{ subnet: 172.31.20.0/24 }] }

@@ -1,0 +1,15 @@
+# Windows Update, Defender signatures, SmartScreen, licensing.
+# Shared by segments that have an "allow_winupdate" line in squid.conf.
+.windowsupdate.com
+.update.microsoft.com
+.delivery.mp.microsoft.com
+.wdcp.microsoft.com
+.wdcpalt.microsoft.com
+.smartscreen.microsoft.com
+.smartscreen-prod.microsoft.com
+definitionupdates.microsoft.com
+go.microsoft.com
+licensing.mp.microsoft.com
+activation-v2.sls.microsoft.com
+crl.microsoft.com
+.pki.microsoft.com

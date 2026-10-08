@@ -1,0 +1,9 @@
+.env
+build/
+vms/
+shared/
+isos/
+mcp-output/
+guacamole/01-initdb.sql
+oem/installers/*.exe
+oem/installers/*.msi

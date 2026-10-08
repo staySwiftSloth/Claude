@@ -1,0 +1,4 @@
+# Sites the Edge MCP browser may load. Keep in step with the URL lists in auth-map.json.
+example.com
+.wikipedia.org
+.wikimedia.org
